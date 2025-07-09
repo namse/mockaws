@@ -77,8 +77,10 @@ const queryItems = db.prepare(`
 `);
 
 
+const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+
 const server = Bun.serve({
-  port: 3000,
+  port,
   async fetch(req) {
     const url = new URL(req.url);
     const path = url.pathname;

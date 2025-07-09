@@ -2,12 +2,12 @@ services:
   mock-aws-server:
     build:
       context: .
-      dockerfile: Dockerfile.server
+      dockerfile: Dockerfile
     container_name: mock-aws-server
     ports:
       - "3000:3000"
     environment:
-      - BASE_URL=http://mock-aws-server:3000
+      - PORT=3000
       - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
       - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
       - AWS_REGION=us-east-1
@@ -37,7 +37,6 @@ services:
     command: bun run client.ts
     networks:
       - mock-aws-network
-
 
 networks:
   mock-aws-network:
