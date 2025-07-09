@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { Database } from "bun:sqlite";
 
-const db = new Database("mockaws.sqlite");
+const db = new Database("/data/mockaws.sqlite");
 
 // S3 Objects Table
 db.exec(`
