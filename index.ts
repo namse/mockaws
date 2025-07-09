@@ -79,6 +79,19 @@ const queryItems = db.prepare(`
 
 const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
+// CORS headers
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-amz-target, x-amz-date, x-amz-security-token',
+  'Access-Control-Max-Age': '86400'
+};
+
+// Helper function to add CORS headers to response
+function addCorsHeaders(headers: Record<string, string> = {}): Record<string, string> {
+  return { ...corsHeaders, ...headers };
+}
+
 const server = Bun.serve({
   port,
   async fetch(req) {
@@ -88,8 +101,19 @@ const server = Bun.serve({
 
     console.log(`${method} ${path}`);
 
+    // Handle preflight requests
+    if (method === 'OPTIONS') {
+      return new Response(null, {
+        status: 200,
+        headers: corsHeaders
+      });
+    }
+
     if (path === "/health") {
-      return new Response("OK", { status: 200 });
+      return new Response("OK", { 
+        status: 200,
+        headers: corsHeaders
+      });
     }
 
     // DynamoDB endpoints - check for x-amz-target header first
@@ -99,7 +123,10 @@ const server = Bun.serve({
 
     // Handle root path POST without x-amz-target as 404
     if (method === "POST" && path === "/" && !req.headers.get('x-amz-target')) {
-      return new Response("Bad Request - Missing x-amz-target header", { status: 400 });
+      return new Response("Bad Request - Missing x-amz-target header", { 
+        status: 400,
+        headers: corsHeaders
+      });
     }
 
     // S3 endpoints
@@ -111,7 +138,10 @@ const server = Bun.serve({
       }
     }
 
-    return new Response("Not Found", { status: 404 });
+    return new Response("Not Found", { 
+      status: 404,
+      headers: corsHeaders
+    });
   },
 });
 
@@ -181,13 +211,19 @@ async function handleGetObject(req: Request, path: string): Promise<Response> {
   const url = new URL(req.url);
 
   if (!key) {
-    return new Response("Missing object key", { status: 400 });
+    return new Response("Missing object key", { 
+      status: 400,
+      headers: corsHeaders
+    });
   }
 
   // presigned URL 서명 검증
   if (url.searchParams.has("X-Amz-Algorithm")) {
     if (!verifySignature(req, url)) {
-      return new Response("Invalid signature", { status: 403 });
+      return new Response("Invalid signature", { 
+        status: 403,
+        headers: corsHeaders
+      });
     }
   }
 
@@ -211,16 +247,16 @@ async function handleGetObject(req: Request, path: string): Promise<Response> {
 </Error>`;
     return new Response(errorXml, { 
       status: 404,
-      headers: { 'Content-Type': 'application/xml' }
+      headers: addCorsHeaders({ 'Content-Type': 'application/xml' })
     });
   }
 
   return new Response(object.data, {
-    headers: {
+    headers: addCorsHeaders({
       "Content-Type": object.content_type,
       "Last-Modified": new Date(object.last_modified).toUTCString(),
       ETag: `"${object.etag}"`,
-    },
+    }),
   });
 }
 
@@ -229,13 +265,19 @@ async function handlePutObject(req: Request, path: string): Promise<Response> {
   const url = new URL(req.url);
 
   if (!key) {
-    return new Response("Missing object key", { status: 400 });
+    return new Response("Missing object key", { 
+      status: 400,
+      headers: corsHeaders
+    });
   }
 
   // presigned URL 서명 검증
   if (url.searchParams.has("X-Amz-Algorithm")) {
     if (!verifySignature(req, url)) {
-      return new Response("Invalid signature", { status: 403 });
+      return new Response("Invalid signature", { 
+        status: 403,
+        headers: corsHeaders
+      });
     }
   }
 
@@ -255,14 +297,17 @@ async function handlePutObject(req: Request, path: string): Promise<Response> {
     transaction();
   } catch (error) {
     console.error("Error storing object:", error);
-    return new Response("Internal server error", { status: 500 });
+    return new Response("Internal server error", { 
+      status: 500,
+      headers: corsHeaders
+    });
   }
 
   return new Response("", {
     status: 200,
-    headers: {
+    headers: addCorsHeaders({
       ETag: `"${etag}"`,
-    },
+    }),
   });
 }
 
@@ -270,7 +315,10 @@ async function handleDynamoDBRequest(req: Request, _path: string): Promise<Respo
   const target = req.headers.get('x-amz-target');
   
   if (!target) {
-    return new Response('Missing x-amz-target header', { status: 400 });
+    return new Response('Missing x-amz-target header', { 
+      status: 400,
+      headers: corsHeaders
+    });
   }
 
   const body = await req.json();
@@ -292,11 +340,17 @@ async function handleDynamoDBRequest(req: Request, _path: string): Promise<Respo
       case 'DynamoDB_20120810.TransactWriteItems':
         return handleTransactWrite(body);
       default:
-        return new Response(`Unsupported operation: ${target}`, { status: 400 });
+        return new Response(`Unsupported operation: ${target}`, { 
+          status: 400,
+          headers: corsHeaders
+        });
     }
   } catch (error) {
     console.error('DynamoDB operation error:', error);
-    return new Response('Internal server error', { status: 500 });
+    return new Response('Internal server error', { 
+      status: 500,
+      headers: corsHeaders
+    });
   }
 }
 
@@ -326,7 +380,7 @@ function handleCreateTable(body: any): Response {
       ItemCount: 0
     }
   }), {
-    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+    headers: addCorsHeaders({ 'Content-Type': 'application/x-amz-json-1.0' })
   });
 }
 
@@ -343,7 +397,7 @@ function handlePutItem(body: any): Response {
   transaction();
   
   return new Response(JSON.stringify({}), {
-    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+    headers: addCorsHeaders({ 'Content-Type': 'application/x-amz-json-1.0' })
   });
 }
 
@@ -359,14 +413,14 @@ function handleGetItem(body: any): Response {
   
   if (!result) {
     return new Response(JSON.stringify({}), {
-      headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+      headers: addCorsHeaders({ 'Content-Type': 'application/x-amz-json-1.0' })
     });
   }
   
   return new Response(JSON.stringify({
     Item: JSON.parse(result.item_data)
   }), {
-    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+    headers: addCorsHeaders({ 'Content-Type': 'application/x-amz-json-1.0' })
   });
 }
 
@@ -384,7 +438,7 @@ function handleUpdateItem(body: any): Response {
       message: 'Requested resource not found'
     }), {
       status: 400,
-      headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+      headers: addCorsHeaders({ 'Content-Type': 'application/x-amz-json-1.0' })
     });
   }
   
@@ -424,7 +478,7 @@ function handleUpdateItem(body: any): Response {
   return new Response(JSON.stringify({
     Attributes: item
   }), {
-    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+    headers: addCorsHeaders({ 'Content-Type': 'application/x-amz-json-1.0' })
   });
 }
 
@@ -439,7 +493,7 @@ function handleDeleteItem(body: any): Response {
   transaction();
   
   return new Response(JSON.stringify({}), {
-    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+    headers: addCorsHeaders({ 'Content-Type': 'application/x-amz-json-1.0' })
   });
 }
 
@@ -474,7 +528,7 @@ function handleQuery(body: any): Response {
     Count: items.length,
     ScannedCount: items.length
   }), {
-    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+    headers: addCorsHeaders({ 'Content-Type': 'application/x-amz-json-1.0' })
   });
 }
 
@@ -534,7 +588,7 @@ function handleTransactWrite(body: any): Response {
   transaction();
   
   return new Response(JSON.stringify({}), {
-    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+    headers: addCorsHeaders({ 'Content-Type': 'application/x-amz-json-1.0' })
   });
 }
 
