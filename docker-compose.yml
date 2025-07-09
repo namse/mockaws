@@ -20,16 +20,17 @@ services:
       retries: 5
       start_period: 40s
 
-  s3-test-client:
+  unified-test-client:
     build:
       context: .
       dockerfile: Dockerfile.client
-    container_name: s3-test-client
+    container_name: unified-test-client
     depends_on:
       mock-aws-server:
         condition: service_healthy
     environment:
       - S3_ENDPOINT=http://mock-aws-server:3000
+      - DYNAMODB_ENDPOINT=http://mock-aws-server:3000/dynamodb
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
       - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
@@ -37,22 +38,6 @@ services:
     networks:
       - mock-aws-network
 
-  dynamodb-test-client:
-    build:
-      context: .
-      dockerfile: Dockerfile.client
-    container_name: dynamodb-test-client
-    depends_on:
-      mock-aws-server:
-        condition: service_healthy
-    environment:
-      - DYNAMODB_ENDPOINT=http://mock-aws-server:3000/dynamodb
-      - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
-      - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-    command: bun run dynamodb-client.ts
-    networks:
-      - mock-aws-network
 
 networks:
   mock-aws-network:

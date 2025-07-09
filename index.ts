@@ -355,7 +355,7 @@ function handleGetItem(body: any): Response {
 }
 
 function handleUpdateItem(body: any): Response {
-  const { TableName, Key, UpdateExpression, ExpressionAttributeValues } = body;
+  const { TableName, Key, UpdateExpression, ExpressionAttributeValues, ExpressionAttributeNames } = body;
   
   const itemKey = generateItemKey(Key);
   const existing = getItem.get(TableName, itemKey) as {
@@ -382,10 +382,13 @@ function handleUpdateItem(body: any): Response {
       assignments.forEach((assignment: string) => {
         const parts = assignment.trim().split('=');
         if (parts.length === 2 && parts[0] && parts[1]) {
-          const attr = parts[0];
-          const valueRef = parts[1];
-          const attrName = attr.trim();
-          const valueKey = valueRef.trim();
+          let attrName = parts[0].trim();
+          const valueKey = parts[1].trim();
+          
+          // Handle ExpressionAttributeNames
+          if (ExpressionAttributeNames && attrName.startsWith('#')) {
+            attrName = ExpressionAttributeNames[attrName] || attrName;
+          }
           
           if (ExpressionAttributeValues && ExpressionAttributeValues[valueKey]) {
             item[attrName] = ExpressionAttributeValues[valueKey];
@@ -471,7 +474,7 @@ function handleTransactWrite(body: any): Response {
         putItem.run(TableName, itemKey, JSON.stringify(Item), now, now);
       } else if (transactItem.Update) {
         // Handle Update operation
-        const { TableName, Key, UpdateExpression, ExpressionAttributeValues } = transactItem.Update;
+        const { TableName, Key, UpdateExpression, ExpressionAttributeValues, ExpressionAttributeNames } = transactItem.Update;
         const itemKey = generateItemKey(Key);
         const existing = getItem.get(TableName, itemKey) as { item_data: string } | undefined;
         
@@ -485,10 +488,13 @@ function handleTransactWrite(body: any): Response {
               assignments.forEach((assignment: string) => {
                 const parts = assignment.trim().split('=');
                 if (parts.length === 2 && parts[0] && parts[1]) {
-                  const attr = parts[0];
-                  const valueRef = parts[1];
-                  const attrName = attr.trim();
-                  const valueKey = valueRef.trim();
+                  let attrName = parts[0].trim();
+                  const valueKey = parts[1].trim();
+                  
+                  // Handle ExpressionAttributeNames
+                  if (ExpressionAttributeNames && attrName.startsWith('#')) {
+                    attrName = ExpressionAttributeNames[attrName] || attrName;
+                  }
                   
                   if (ExpressionAttributeValues && ExpressionAttributeValues[valueKey]) {
                     item[attrName] = ExpressionAttributeValues[valueKey];
@@ -517,7 +523,12 @@ function handleTransactWrite(body: any): Response {
 }
 
 function generateItemKey(item: any): string {
-  return JSON.stringify(item);
+  // Extract only the primary key attributes (id for our test case)
+  const keyAttrs: any = {};
+  if (item.id !== undefined) {
+    keyAttrs.id = item.id;
+  }
+  return JSON.stringify(keyAttrs);
 }
 
 console.log(`Mock AWS Server running on http://localhost:${server.port}`);
