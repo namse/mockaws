@@ -1,0 +1,41 @@
+services:
+  s3-mock-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: s3-mock-server
+    ports:
+      - "3000:3000"
+    environment:
+      - BASE_URL=http://s3-mock-server:3000
+      - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+      - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+      - AWS_REGION=us-east-1
+    networks:
+      - mock-aws-network
+    healthcheck:
+      test: ["CMD", "bun", "run", "healthcheck.ts"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  s3-test-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: s3-test-client
+    depends_on:
+      s3-mock-server:
+        condition: service_healthy
+    environment:
+      - S3_ENDPOINT=http://s3-mock-server:3000
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+      - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    networks:
+      - mock-aws-network
+
+networks:
+  mock-aws-network:
+    driver: bridge
