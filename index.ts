@@ -1,8 +1,9 @@
 import crypto from "crypto";
 import { Database } from "bun:sqlite";
 
-const db = new Database("s3-storage.sqlite");
+const db = new Database("mockaws.sqlite");
 
+// S3 Objects Table
 db.exec(`
   CREATE TABLE IF NOT EXISTS objects (
     key TEXT PRIMARY KEY,
@@ -13,6 +14,28 @@ db.exec(`
   )
 `);
 
+// DynamoDB Tables
+db.exec(`
+  CREATE TABLE IF NOT EXISTS dynamodb_tables (
+    table_name TEXT PRIMARY KEY,
+    key_schema TEXT NOT NULL,
+    attribute_definitions TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS dynamodb_items (
+    table_name TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    item_data TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (table_name, item_key)
+  )
+`);
+
+// S3 prepared statements
 const insertObject = db.prepare(`
   INSERT OR REPLACE INTO objects (key, data, content_type, last_modified, etag)
   VALUES (?, ?, ?, ?, ?)
@@ -22,6 +45,35 @@ const getObject = db.prepare(`
   SELECT data, content_type, last_modified, etag
   FROM objects
   WHERE key = ?
+`);
+
+// DynamoDB prepared statements
+const createTable = db.prepare(`
+  INSERT OR REPLACE INTO dynamodb_tables (table_name, key_schema, attribute_definitions, created_at)
+  VALUES (?, ?, ?, ?)
+`);
+
+const putItem = db.prepare(`
+  INSERT OR REPLACE INTO dynamodb_items (table_name, item_key, item_data, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?)
+`);
+
+const getItem = db.prepare(`
+  SELECT item_data, created_at, updated_at
+  FROM dynamodb_items
+  WHERE table_name = ? AND item_key = ?
+`);
+
+const deleteItem = db.prepare(`
+  DELETE FROM dynamodb_items
+  WHERE table_name = ? AND item_key = ?
+`);
+
+const queryItems = db.prepare(`
+  SELECT item_key, item_data, created_at, updated_at
+  FROM dynamodb_items
+  WHERE table_name = ? AND item_key LIKE ?
+  ORDER BY item_key
 `);
 
 
@@ -38,6 +90,14 @@ const server = Bun.serve({
       return new Response("OK", { status: 200 });
     }
 
+    // DynamoDB endpoints
+    if (path.startsWith("/dynamodb/")) {
+      if (method === "POST") {
+        return handleDynamoDBRequest(req, path);
+      }
+    }
+
+    // S3 endpoints
     if (path.startsWith("/")) {
       if (method === "GET") {
         return handleGetObject(req, path);
@@ -190,7 +250,272 @@ async function handlePutObject(req: Request, path: string): Promise<Response> {
   });
 }
 
-console.log(`S3 Mock Server running on http://localhost:${server.port}`);
+async function handleDynamoDBRequest(req: Request, path: string): Promise<Response> {
+  const target = req.headers.get('x-amz-target');
+  
+  if (!target) {
+    return new Response('Missing x-amz-target header', { status: 400 });
+  }
+
+  const body = await req.json();
+  
+  try {
+    switch (target) {
+      case 'DynamoDB_20120810.CreateTable':
+        return handleCreateTable(body);
+      case 'DynamoDB_20120810.PutItem':
+        return handlePutItem(body);
+      case 'DynamoDB_20120810.GetItem':
+        return handleGetItem(body);
+      case 'DynamoDB_20120810.UpdateItem':
+        return handleUpdateItem(body);
+      case 'DynamoDB_20120810.DeleteItem':
+        return handleDeleteItem(body);
+      case 'DynamoDB_20120810.Query':
+        return handleQuery(body);
+      case 'DynamoDB_20120810.TransactWriteItems':
+        return handleTransactWrite(body);
+      default:
+        return new Response(`Unsupported operation: ${target}`, { status: 400 });
+    }
+  } catch (error) {
+    console.error('DynamoDB operation error:', error);
+    return new Response('Internal server error', { status: 500 });
+  }
+}
+
+function handleCreateTable(body: any): Response {
+  const { TableName, KeySchema, AttributeDefinitions } = body;
+  
+  const now = Date.now();
+  const transaction = db.transaction(() => {
+    createTable.run(
+      TableName,
+      JSON.stringify(KeySchema),
+      JSON.stringify(AttributeDefinitions),
+      now
+    );
+  });
+  
+  transaction();
+  
+  return new Response(JSON.stringify({
+    TableDescription: {
+      TableName,
+      KeySchema,
+      AttributeDefinitions,
+      TableStatus: 'ACTIVE',
+      CreationDateTime: now / 1000,
+      TableSizeBytes: 0,
+      ItemCount: 0
+    }
+  }), {
+    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+  });
+}
+
+function handlePutItem(body: any): Response {
+  const { TableName, Item } = body;
+  
+  const itemKey = generateItemKey(Item);
+  const now = Date.now();
+  
+  const transaction = db.transaction(() => {
+    putItem.run(TableName, itemKey, JSON.stringify(Item), now, now);
+  });
+  
+  transaction();
+  
+  return new Response(JSON.stringify({}), {
+    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+  });
+}
+
+function handleGetItem(body: any): Response {
+  const { TableName, Key } = body;
+  
+  const itemKey = generateItemKey(Key);
+  const result = getItem.get(TableName, itemKey) as {
+    item_data: string;
+    created_at: number;
+    updated_at: number;
+  } | undefined;
+  
+  if (!result) {
+    return new Response(JSON.stringify({}), {
+      headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+    });
+  }
+  
+  return new Response(JSON.stringify({
+    Item: JSON.parse(result.item_data)
+  }), {
+    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+  });
+}
+
+function handleUpdateItem(body: any): Response {
+  const { TableName, Key, UpdateExpression, ExpressionAttributeValues } = body;
+  
+  const itemKey = generateItemKey(Key);
+  const existing = getItem.get(TableName, itemKey) as {
+    item_data: string;
+  } | undefined;
+  
+  if (!existing) {
+    return new Response(JSON.stringify({
+      __type: 'ResourceNotFoundException',
+      message: 'Requested resource not found'
+    }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+    });
+  }
+  
+  const item = JSON.parse(existing.item_data);
+  
+  // Simple SET operation parsing
+  if (UpdateExpression && UpdateExpression.includes('SET')) {
+    const setMatch = UpdateExpression.match(/SET\s+(.+)/);
+    if (setMatch) {
+      const assignments = setMatch[1].split(',');
+      assignments.forEach((assignment: string) => {
+        const [attr, valueRef] = assignment.trim().split('=');
+        const attrName = attr.trim();
+        const valueKey = valueRef.trim();
+        
+        if (ExpressionAttributeValues && ExpressionAttributeValues[valueKey]) {
+          item[attrName] = ExpressionAttributeValues[valueKey];
+        }
+      });
+    }
+  }
+  
+  const now = Date.now();
+  const transaction = db.transaction(() => {
+    putItem.run(TableName, itemKey, JSON.stringify(item), existing ? Date.now() : now, now);
+  });
+  
+  transaction();
+  
+  return new Response(JSON.stringify({
+    Attributes: item
+  }), {
+    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+  });
+}
+
+function handleDeleteItem(body: any): Response {
+  const { TableName, Key } = body;
+  
+  const itemKey = generateItemKey(Key);
+  const transaction = db.transaction(() => {
+    deleteItem.run(TableName, itemKey);
+  });
+  
+  transaction();
+  
+  return new Response(JSON.stringify({}), {
+    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+  });
+}
+
+function handleQuery(body: any): Response {
+  const { TableName, KeyConditionExpression, ExpressionAttributeValues } = body;
+  
+  // Simple query implementation - assumes partition key equality
+  let searchPattern = '%';
+  if (KeyConditionExpression && ExpressionAttributeValues) {
+    const keyMatch = KeyConditionExpression.match(/:(\w+)/);
+    if (keyMatch) {
+      const valueKey = ':' + keyMatch[1];
+      const keyValue = ExpressionAttributeValues[valueKey];
+      if (keyValue) {
+        const keyStr = JSON.stringify(keyValue);
+        searchPattern = `%${keyStr}%`;
+      }
+    }
+  }
+  
+  const results = queryItems.all(TableName, searchPattern) as {
+    item_key: string;
+    item_data: string;
+    created_at: number;
+    updated_at: number;
+  }[];
+  
+  const items = results.map(row => JSON.parse(row.item_data));
+  
+  return new Response(JSON.stringify({
+    Items: items,
+    Count: items.length,
+    ScannedCount: items.length
+  }), {
+    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+  });
+}
+
+function handleTransactWrite(body: any): Response {
+  const { TransactItems } = body;
+  
+  const transaction = db.transaction(() => {
+    for (const transactItem of TransactItems) {
+      if (transactItem.Put) {
+        const { TableName, Item } = transactItem.Put;
+        const itemKey = generateItemKey(Item);
+        const now = Date.now();
+        putItem.run(TableName, itemKey, JSON.stringify(Item), now, now);
+      } else if (transactItem.Update) {
+        // Handle Update operation
+        const { TableName, Key, UpdateExpression, ExpressionAttributeValues } = transactItem.Update;
+        const itemKey = generateItemKey(Key);
+        const existing = getItem.get(TableName, itemKey) as { item_data: string } | undefined;
+        
+        if (existing) {
+          const item = JSON.parse(existing.item_data);
+          
+          if (UpdateExpression && UpdateExpression.includes('SET')) {
+            const setMatch = UpdateExpression.match(/SET\s+(.+)/);
+            if (setMatch) {
+              const assignments = setMatch[1].split(',');
+              assignments.forEach((assignment: string) => {
+                const [attr, valueRef] = assignment.trim().split('=');
+                const attrName = attr.trim();
+                const valueKey = valueRef.trim();
+                
+                if (ExpressionAttributeValues && ExpressionAttributeValues[valueKey]) {
+                  item[attrName] = ExpressionAttributeValues[valueKey];
+                }
+              });
+            }
+          }
+          
+          const now = Date.now();
+          putItem.run(TableName, itemKey, JSON.stringify(item), Date.now(), now);
+        }
+      } else if (transactItem.Delete) {
+        const { TableName, Key } = transactItem.Delete;
+        const itemKey = generateItemKey(Key);
+        deleteItem.run(TableName, itemKey);
+      }
+    }
+  });
+  
+  transaction();
+  
+  return new Response(JSON.stringify({}), {
+    headers: { 'Content-Type': 'application/x-amz-json-1.0' }
+  });
+}
+
+function generateItemKey(item: any): string {
+  return JSON.stringify(item);
+}
+
+console.log(`Mock AWS Server running on http://localhost:${server.port}`);
 console.log("Available endpoints:");
-console.log("  GET  /<key> - Get object (supports presigned URL verification)");
-console.log("  PUT  /<key> - Put object (supports presigned URL verification)");
+console.log("  S3:");
+console.log("    GET  /<key> - Get object (supports presigned URL verification)");
+console.log("    PUT  /<key> - Put object (supports presigned URL verification)");
+console.log("  DynamoDB:");
+console.log("    POST /dynamodb/ - DynamoDB operations (CreateTable, PutItem, GetItem, UpdateItem, DeleteItem, Query, TransactWriteItems)");

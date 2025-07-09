@@ -10,7 +10,9 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.840.0",
     "@aws-sdk/client-s3": "^3.842.0",
+    "@aws-sdk/lib-dynamodb": "^3.840.0",
     "@aws-sdk/s3-request-presigner": "^3.842.0"
   }
 }
