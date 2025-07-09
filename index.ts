@@ -198,7 +198,18 @@ async function handleGetObject(req: Request, path: string): Promise<Response> {
     | undefined;
 
   if (!object) {
-    return new Response("Object not found", { status: 404 });
+    const errorXml = `<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>NoSuchKey</Code>
+    <Message>The specified key does not exist.</Message>
+    <Key>${key}</Key>
+    <RequestId>1234567890</RequestId>
+    <HostId>mock-aws-server</HostId>
+</Error>`;
+    return new Response(errorXml, { 
+      status: 404,
+      headers: { 'Content-Type': 'application/xml' }
+    });
   }
 
   return new Response(object.data, {

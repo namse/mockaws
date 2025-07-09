@@ -96,6 +96,23 @@ async function testGetObject() {
   }
 }
 
+async function testGetNonExistentObject() {
+  console.log('Testing GET non-existent object...');
+  
+  const getCommand = new GetObjectCommand({
+    Bucket: bucketName,
+    Key: 'non-existent-file.txt',
+  });
+
+  try {
+    const response = await s3Client.send(getCommand);
+    const body = await response.Body?.transformToString();
+    console.log('GET non-existent object unexpected success:', { body, contentType: response.ContentType });
+  } catch (error: any) {
+    console.log('GET non-existent object correctly failed:', error.name, error.message);
+  }
+}
+
 async function testPresignedUrl() {
   console.log('Testing presigned URL...');
   
@@ -208,6 +225,24 @@ async function testDynamoDBGet() {
     console.log('DynamoDB Get successful:', response.Item);
   } catch (error) {
     console.error('DynamoDB Get failed:', error);
+  }
+}
+
+async function testDynamoDBGetNonExistent() {
+  console.log('Testing DynamoDB Get non-existent item...');
+  
+  const command = new GetCommand({
+    TableName: tableName,
+    Key: {
+      id: 'non-existent-id'
+    }
+  });
+
+  try {
+    const response = await docClient.send(command);
+    console.log('DynamoDB Get non-existent item result:', response.Item ? 'Found item' : 'No item (expected)');
+  } catch (error) {
+    console.error('DynamoDB Get non-existent item failed:', error);
   }
 }
 
@@ -345,6 +380,9 @@ async function runTests() {
   
   await testGetObject();
   console.log('');
+
+  await testGetNonExistentObject();
+  console.log('');
   
   await testPresignedUrl();
   console.log('');
@@ -361,6 +399,9 @@ async function runTests() {
   console.log('');
   
   await testDynamoDBGet();
+  console.log('');
+
+  await testDynamoDBGetNonExistent();
   console.log('');
   
   await testDynamoDBUpdate();
