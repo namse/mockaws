@@ -10,12 +10,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@aws-crypto/sha256-js": "^5.2.0",
     "@aws-sdk/client-s3": "^3.842.0",
-    "@aws-sdk/s3-request-presigner": "^3.842.0",
-    "@smithy/protocol-http": "^5.1.2",
-    "@smithy/signature-v4": "^5.1.2",
-    "@types/crypto-js": "^4.2.2",
-    "crypto-js": "^4.2.0"
+    "@aws-sdk/s3-request-presigner": "^3.842.0"
   }
 }
