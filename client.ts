@@ -2,7 +2,7 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DynamoDBClient, CreateTableCommand } from '@aws-sdk/client-dynamodb';
 import { 
-  DynamoDBDocumentClient, 
+  DynamoDBDocument,
   PutCommand, 
   GetCommand, 
   UpdateCommand, 
@@ -49,14 +49,14 @@ const s3Client = new S3Client({
 
 const dynamodbClient = new DynamoDBClient({
   region,
-  endpoint: dynamodbEndpoint,
+  endpoint: s3Endpoint, // DynamoDB도 같은 엔드포인트 사용
   credentials: {
     accessKeyId,
     secretAccessKey,
   },
 });
 
-const docClient = DynamoDBDocumentClient.from(dynamodbClient);
+const docClient = DynamoDBDocument.from(dynamodbClient);
 
 const bucketName = 'test-bucket';
 const tableName = 'test-table';

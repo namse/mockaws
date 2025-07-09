@@ -30,7 +30,7 @@ services:
         condition: service_healthy
     environment:
       - S3_ENDPOINT=http://mock-aws-server:3000
-      - DYNAMODB_ENDPOINT=http://mock-aws-server:3000/dynamodb
+      - DYNAMODB_ENDPOINT=http://mock-aws-server:3000
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
       - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY

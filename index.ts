@@ -92,11 +92,14 @@ const server = Bun.serve({
       return new Response("OK", { status: 200 });
     }
 
-    // DynamoDB endpoints
-    if (path.startsWith("/dynamodb/")) {
-      if (method === "POST") {
-        return handleDynamoDBRequest(req, path);
-      }
+    // DynamoDB endpoints - check for x-amz-target header first
+    if (method === "POST" && req.headers.get('x-amz-target')) {
+      return handleDynamoDBRequest(req, path);
+    }
+
+    // Handle root path POST without x-amz-target as 404
+    if (method === "POST" && path === "/" && !req.headers.get('x-amz-target')) {
+      return new Response("Bad Request - Missing x-amz-target header", { status: 400 });
     }
 
     // S3 endpoints
