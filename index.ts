@@ -110,7 +110,7 @@ const server = Bun.serve({
   },
 });
 
-function verifySignature(req: Request, url: URL): boolean {
+function verifySignature(_req: Request, url: URL): boolean {
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
   const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
   const region = process.env.AWS_REGION || "us-east-1";
@@ -250,7 +250,7 @@ async function handlePutObject(req: Request, path: string): Promise<Response> {
   });
 }
 
-async function handleDynamoDBRequest(req: Request, path: string): Promise<Response> {
+async function handleDynamoDBRequest(req: Request, _path: string): Promise<Response> {
   const target = req.headers.get('x-amz-target');
   
   if (!target) {
@@ -380,12 +380,16 @@ function handleUpdateItem(body: any): Response {
     if (setMatch) {
       const assignments = setMatch[1].split(',');
       assignments.forEach((assignment: string) => {
-        const [attr, valueRef] = assignment.trim().split('=');
-        const attrName = attr.trim();
-        const valueKey = valueRef.trim();
-        
-        if (ExpressionAttributeValues && ExpressionAttributeValues[valueKey]) {
-          item[attrName] = ExpressionAttributeValues[valueKey];
+        const parts = assignment.trim().split('=');
+        if (parts.length === 2 && parts[0] && parts[1]) {
+          const attr = parts[0];
+          const valueRef = parts[1];
+          const attrName = attr.trim();
+          const valueKey = valueRef.trim();
+          
+          if (ExpressionAttributeValues && ExpressionAttributeValues[valueKey]) {
+            item[attrName] = ExpressionAttributeValues[valueKey];
+          }
         }
       });
     }
@@ -479,12 +483,16 @@ function handleTransactWrite(body: any): Response {
             if (setMatch) {
               const assignments = setMatch[1].split(',');
               assignments.forEach((assignment: string) => {
-                const [attr, valueRef] = assignment.trim().split('=');
-                const attrName = attr.trim();
-                const valueKey = valueRef.trim();
-                
-                if (ExpressionAttributeValues && ExpressionAttributeValues[valueKey]) {
-                  item[attrName] = ExpressionAttributeValues[valueKey];
+                const parts = assignment.trim().split('=');
+                if (parts.length === 2 && parts[0] && parts[1]) {
+                  const attr = parts[0];
+                  const valueRef = parts[1];
+                  const attrName = attr.trim();
+                  const valueKey = valueRef.trim();
+                  
+                  if (ExpressionAttributeValues && ExpressionAttributeValues[valueKey]) {
+                    item[attrName] = ExpressionAttributeValues[valueKey];
+                  }
                 }
               });
             }
