@@ -2,8 +2,35 @@ import { SignatureV4 } from '@smithy/signature-v4';
 import { Sha256 } from '@aws-crypto/sha256-js';
 import { HttpRequest } from '@smithy/protocol-http';
 import crypto from 'crypto';
+import { Database } from 'bun:sqlite';
 
-const storage = new Map<string, { data: string; contentType: string; lastModified: Date }>();
+const db = new Database('s3-storage.sqlite');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS objects (
+    key TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    last_modified INTEGER NOT NULL,
+    etag TEXT NOT NULL
+  )
+`);
+
+const insertObject = db.prepare(`
+  INSERT OR REPLACE INTO objects (key, data, content_type, last_modified, etag)
+  VALUES (?, ?, ?, ?, ?)
+`);
+
+const getObject = db.prepare(`
+  SELECT data, content_type, last_modified, etag
+  FROM objects
+  WHERE key = ?
+`);
+
+const deleteObject = db.prepare(`
+  DELETE FROM objects
+  WHERE key = ?
+`);
 
 const server = Bun.serve({
   port: 3000,
@@ -88,16 +115,22 @@ async function handleGetObject(req: Request, path: string): Promise<Response> {
     }
   }
   
-  const object = storage.get(key);
+  const object = getObject.get(key) as {
+    data: string;
+    content_type: string;
+    last_modified: number;
+    etag: string;
+  } | undefined;
+  
   if (!object) {
     return new Response('Object not found', { status: 404 });
   }
   
   return new Response(object.data, {
     headers: {
-      'Content-Type': object.contentType,
-      'Last-Modified': object.lastModified.toUTCString(),
-      'ETag': `"${crypto.createHash('md5').update(object.data).digest('hex')}"`,
+      'Content-Type': object.content_type,
+      'Last-Modified': new Date(object.last_modified).toUTCString(),
+      'ETag': `"${object.etag}"`,
     },
   });
 }
@@ -120,15 +153,20 @@ async function handlePutObject(req: Request, path: string): Promise<Response> {
   const contentType = req.headers.get('content-type') || 'application/octet-stream';
   const data = await req.text();
   
-  const object = {
-    data,
-    contentType,
-    lastModified: new Date(),
-  };
-  
-  storage.set(key, object);
-  
   const etag = crypto.createHash('md5').update(data).digest('hex');
+  const lastModified = Date.now();
+  
+  // 트랜잭션 사용하여 데이터 일관성 보장
+  const transaction = db.transaction(() => {
+    insertObject.run(key, data, contentType, lastModified, etag);
+  });
+  
+  try {
+    transaction();
+  } catch (error) {
+    console.error('Error storing object:', error);
+    return new Response('Internal server error', { status: 500 });
+  }
   
   return new Response('', {
     status: 200,
