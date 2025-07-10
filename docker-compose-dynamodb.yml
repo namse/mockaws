@@ -1,0 +1,41 @@
+services:
+  mock-aws-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mock-aws-server-dynamodb
+    environment:
+      - PORT=3000
+      - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+      - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+      - AWS_REGION=us-east-1
+    networks:
+      - mock-aws-dynamodb-network
+    healthcheck:
+      test: ["CMD", "bun", "run", "healthcheck.ts"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+
+  dynamodb-test-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: dynamodb-test-client
+    depends_on:
+      mock-aws-server:
+        condition: service_healthy
+    environment:
+      - S3_ENDPOINT=http://mock-aws-server:3000
+      - DYNAMODB_ENDPOINT=http://mock-aws-server:3000
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+      - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    command: bun run test-dynamodb.ts
+    networks:
+      - mock-aws-dynamodb-network
+
+networks:
+  mock-aws-dynamodb-network:
+    driver: bridge

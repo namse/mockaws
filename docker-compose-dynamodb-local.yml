@@ -1,0 +1,35 @@
+services:
+  dynamodb-local:
+    container_name: dynamodb-local
+    image: amazon/dynamodb-local
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    networks:
+      - dynamodb-local-network
+    healthcheck:
+      test: ["CMD-SHELL", "if [ \"$(curl -s -o /dev/null -I -w '%{http_code}' http://localhost:8000)\" == \"400\" ]; then exit 0; else exit 1; fi"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+
+  dynamodb-test-client-local:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: dynamodb-test-client-local
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+    environment:
+      - S3_ENDPOINT=http://dynamodb-local:8000
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+      - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    command: bun run test-dynamodb.ts
+    networks:
+      - dynamodb-local-network
+
+networks:
+  dynamodb-local-network:
+    driver: bridge

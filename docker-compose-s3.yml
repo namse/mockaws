@@ -3,26 +3,26 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: mock-aws-server
+    container_name: mock-aws-server-s3
     environment:
       - PORT=3000
       - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
       - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
       - AWS_REGION=us-east-1
     networks:
-      - mock-aws-network
+      - mock-aws-s3-network
     healthcheck:
       test: ["CMD", "bun", "run", "healthcheck.ts"]
-      interval: 30s
-      timeout: 10s
+      interval: 3s
+      timeout: 3s
       retries: 5
-      start_period: 40s
+      start_period: 3s
 
-  unified-test-client:
+  s3-test-client:
     build:
       context: .
       dockerfile: Dockerfile.client
-    container_name: unified-test-client
+    container_name: s3-test-client
     depends_on:
       mock-aws-server:
         condition: service_healthy
@@ -32,10 +32,10 @@ services:
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
       - AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-    command: bun run client.ts
+    command: bun run test-s3.ts
     networks:
-      - mock-aws-network
+      - mock-aws-s3-network
 
 networks:
-  mock-aws-network:
+  mock-aws-s3-network:
     driver: bridge
