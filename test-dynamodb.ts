@@ -6,6 +6,7 @@ import {
   UpdateCommand, 
   DeleteCommand, 
   QueryCommand,
+  ScanCommand,
   TransactWriteCommand
 } from '@aws-sdk/lib-dynamodb';
 import { config } from './config';
@@ -270,6 +271,40 @@ async function testDynamoDBDelete() {
   }
 }
 
+async function testDynamoDBScan() {
+  console.log('Testing DynamoDB Scan...');
+  
+  const command = new ScanCommand({
+    TableName: config.tableName
+  });
+
+  try {
+    const response = await docClient.send(command);
+    console.log('DynamoDB Scan successful:', response.Items?.length, 'items found');
+    console.log('Items:', response.Items);
+  } catch (error) {
+    console.error('DynamoDB Scan failed:', error);
+  }
+}
+
+async function testDynamoDBScanWithLimit() {
+  console.log('Testing DynamoDB Scan with Limit...');
+  
+  const command = new ScanCommand({
+    TableName: config.tableName,
+    Limit: 3
+  });
+
+  try {
+    const response = await docClient.send(command);
+    console.log('DynamoDB Scan with Limit successful:', response.Items?.length, 'items found');
+    console.log('Has more items:', !!response.LastEvaluatedKey);
+    console.log('LastEvaluatedKey:', response.LastEvaluatedKey);
+  } catch (error) {
+    console.error('DynamoDB Scan with Limit failed:', error);
+  }
+}
+
 async function testDynamoDBConditionalPut() {
   console.log('Testing DynamoDB Conditional Put (create if not exists)...');
   
@@ -429,6 +464,12 @@ export async function runDynamoDBTests() {
   console.log('');
   
   await testDynamoDBDelete();
+  console.log('');
+
+  await testDynamoDBScan();
+  console.log('');
+
+  await testDynamoDBScanWithLimit();
   console.log('');
 
   await testDynamoDBConditionalPut();

@@ -7,6 +7,7 @@ export class DynamoDBHandler {
   private getItem: any;
   private deleteItem: any;
   private queryItems: any;
+  private scanItems: any;
 
   constructor(db: Database) {
     this.db = db;
@@ -41,14 +42,32 @@ export class DynamoDBHandler {
       WHERE table_name = ? AND item_key LIKE ?
       ORDER BY item_key
     `);
+
+    this.scanItems = this.db.prepare(`
+      SELECT item_key, item_data, created_at, updated_at
+      FROM dynamodb_items
+      WHERE table_name = ?
+      ORDER BY item_key
+    `);
   }
 
   private generateItemKey(item: any): string {
-    // Extract only the primary key attributes (id for our test case)
+    // Extract primary key attributes - support both simple and composite keys
     const keyAttrs: any = {};
-    if (item.id !== undefined) {
+    
+    // Support composite keys ($p, $s)
+    if (item.$p !== undefined) {
+      keyAttrs.$p = item.$p;
+    }
+    if (item.$s !== undefined) {
+      keyAttrs.$s = item.$s;
+    }
+    
+    // Support simple key (id) for backward compatibility
+    if (item.id !== undefined && !keyAttrs.$p) {
       keyAttrs.id = item.id;
     }
+    
     return JSON.stringify(keyAttrs);
   }
 
@@ -78,6 +97,8 @@ export class DynamoDBHandler {
           return this.handleDeleteItem(body, corsHeaders);
         case 'DynamoDB_20120810.Query':
           return this.handleQuery(body, corsHeaders);
+        case 'DynamoDB_20120810.Scan':
+          return this.handleScan(body, corsHeaders);
         case 'DynamoDB_20120810.TransactWriteItems':
           return this.handleTransactWrite(body, corsHeaders);
         default:
@@ -239,18 +260,33 @@ export class DynamoDBHandler {
   }
 
   private handleQuery(body: any, corsHeaders: Record<string, string>): Response {
-    const { TableName, KeyConditionExpression, ExpressionAttributeValues } = body;
+    const { TableName, KeyConditionExpression, ExpressionAttributeValues, ExpressionAttributeNames, Limit, ExclusiveStartKey } = body;
     
-    // Simple query implementation - assumes partition key equality
+    // Handle partition key queries for composite keys
     let searchPattern = '%';
     if (KeyConditionExpression && ExpressionAttributeValues) {
-      const keyMatch = KeyConditionExpression.match(/:(\w+)/);
-      if (keyMatch) {
-        const valueKey = ':' + keyMatch[1];
+      // Look for partition key expression like "#p = :pk"
+      const partitionKeyMatch = KeyConditionExpression.match(/#p\s*=\s*:(\w+)/);
+      if (partitionKeyMatch) {
+        const valueKey = ':' + partitionKeyMatch[1];
         const keyValue = ExpressionAttributeValues[valueKey];
         if (keyValue) {
-          const keyStr = JSON.stringify(keyValue);
-          searchPattern = `%${keyStr}%`;
+          // Create a partial key pattern to match partition key
+          const partialKey = { $p: keyValue };
+          const keyStr = JSON.stringify(partialKey);
+          // Remove the closing brace to match items with this partition key
+          searchPattern = `${keyStr.slice(0, -1)}%`;
+        }
+      } else {
+        // Fallback to original logic for simple keys
+        const keyMatch = KeyConditionExpression.match(/:(\w+)/);
+        if (keyMatch) {
+          const valueKey = ':' + keyMatch[1];
+          const keyValue = ExpressionAttributeValues[valueKey];
+          if (keyValue) {
+            const keyStr = JSON.stringify(keyValue);
+            searchPattern = `%${keyStr}%`;
+          }
         }
       }
     }
@@ -262,15 +298,102 @@ export class DynamoDBHandler {
       updated_at: number;
     }[];
     
-    const items = results.map(row => JSON.parse(row.item_data));
+    let items = results.map(row => JSON.parse(row.item_data));
+    let filteredResults = results;
     
-    return new Response(JSON.stringify({
+    // Handle pagination with ExclusiveStartKey
+    if (ExclusiveStartKey) {
+      const startKey = this.generateItemKey(ExclusiveStartKey);
+      const startIndex = results.findIndex(row => row.item_key === startKey);
+      if (startIndex >= 0) {
+        items = items.slice(startIndex + 1);
+        filteredResults = results.slice(startIndex + 1);
+      }
+    }
+    
+    // Apply limit - DynamoDB always returns LastEvaluatedKey when limit is reached
+    let hasMoreItems = false;
+    const scannedCount = items.length;
+    if (Limit && items.length >= Limit) {
+      items = items.slice(0, Limit);
+      hasMoreItems = true;
+    }
+    
+    const response: any = {
+      Items: items,
+      Count: items.length,
+      ScannedCount: scannedCount
+    };
+    
+    // Add LastEvaluatedKey if limit was reached
+    if (hasMoreItems && items.length > 0) {
+      const lastItem = items[items.length - 1];
+      response.LastEvaluatedKey = this.extractKeyFromItem(lastItem);
+    }
+    
+    return new Response(JSON.stringify(response), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/x-amz-json-1.0' }
+    });
+  }
+
+  private handleScan(body: any, corsHeaders: Record<string, string>): Response {
+    const { TableName, Limit, ExclusiveStartKey } = body;
+    
+    const results = this.scanItems.all(TableName) as {
+      item_key: string;
+      item_data: string;
+      created_at: number;
+      updated_at: number;
+    }[];
+    
+    let items = results.map(row => JSON.parse(row.item_data));
+    
+    // Handle pagination with ExclusiveStartKey
+    if (ExclusiveStartKey) {
+      const startKey = JSON.stringify(ExclusiveStartKey);
+      const startIndex = results.findIndex(row => row.item_key === startKey);
+      if (startIndex >= 0) {
+        items = items.slice(startIndex + 1);
+      }
+    }
+    
+    // Apply limit
+    let hasMoreItems = false;
+    if (Limit && items.length > Limit) {
+      items = items.slice(0, Limit);
+      hasMoreItems = true;
+    }
+    
+    const response: any = {
       Items: items,
       Count: items.length,
       ScannedCount: items.length
-    }), {
+    };
+    
+    // Add LastEvaluatedKey if there are more items
+    if (hasMoreItems && items.length > 0) {
+      const lastItem = items[items.length - 1];
+      response.LastEvaluatedKey = this.extractKeyFromItem(lastItem);
+    }
+    
+    return new Response(JSON.stringify(response), {
       headers: { ...corsHeaders, 'Content-Type': 'application/x-amz-json-1.0' }
     });
+  }
+
+  private extractKeyFromItem(item: any): any {
+    // Extract primary key attributes from item
+    const key: any = {};
+    if (item.id !== undefined) {
+      key.id = item.id;
+    }
+    if (item.$p !== undefined) {
+      key.$p = item.$p;
+    }
+    if (item.$s !== undefined) {
+      key.$s = item.$s;
+    }
+    return key;
   }
 
   private handleTransactWrite(body: any, corsHeaders: Record<string, string>): Response {
